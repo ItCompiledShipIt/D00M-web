@@ -6,6 +6,7 @@
 //! the mapping lives in pure functions so it can be tested without hardware;
 //! only [`Pad::poll`] touches `gilrs`.
 
+#[cfg(not(target_arch = "wasm32"))]
 use gilrs::{Axis, Button, Gilrs};
 
 /// Sticks smaller than this are treated as centred.
@@ -138,16 +139,19 @@ pub fn motion_with(raw: &Raw, invert_forward: bool) -> Motion {
 
 /// Controller plugged in or pulled out, for the on-screen note.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))] // constructed by the native gilrs poll until M6
 pub enum PadEvent {
     Connected(String),
     Disconnected,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub struct Pad {
     gilrs: Gilrs,
     prev: [bool; PadAction::ALL.len()],
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Pad {
     /// Open the gamepad layer. Silence is fine: no controller, no problem.
     pub fn open() -> Option<Pad> {
@@ -211,6 +215,30 @@ impl Pad {
         let actions = pressed(&self.prev, &now);
         self.prev = now;
         (actions, motion_with(&raw, invert_forward), event)
+    }
+}
+
+/// Web stand-in: no controller until the Gamepad API wiring lands (M6).
+/// gilrs' web backend reaches for platform facilities a plain LAN page
+/// does not have, so `open` declines and the game runs keyboard-only,
+/// exactly as it does natively with no pad plugged in.
+#[cfg(target_arch = "wasm32")]
+pub struct Pad {
+    prev: [bool; PadAction::ALL.len()],
+}
+
+#[cfg(target_arch = "wasm32")]
+impl Pad {
+    pub fn open() -> Option<Pad> {
+        None
+    }
+
+    pub fn poll(&mut self, invert_forward: bool) -> (Vec<PadAction>, Motion, Option<PadEvent>) {
+        let raw = Raw::default();
+        let now = held(&raw);
+        let actions = pressed(&self.prev, &now);
+        self.prev = now;
+        (actions, motion_with(&raw, invert_forward), None)
     }
 }
 

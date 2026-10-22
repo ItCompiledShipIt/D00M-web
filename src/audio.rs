@@ -6,8 +6,10 @@
 //! can be opened the game simply runs silent.
 
 use std::sync::Arc;
+#[cfg(not(target_arch = "wasm32"))]
 use std::sync::mpsc::{self, Receiver, Sender};
 
+#[cfg(not(target_arch = "wasm32"))]
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, SizedSample};
 
@@ -60,6 +62,7 @@ pub struct SoundRequest {
     pub pan: f32,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 enum Command {
     Play(SoundRequest),
     Volumes {
@@ -75,6 +78,7 @@ enum Command {
 
 /// Pre-rendered effects, indexed by `SoundId as usize`, plus the ambient
 /// loop and the music loop.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))] // read by the native stream's render loop until M4
 pub struct Bank {
     pub sounds: Vec<Arc<Vec<f32>>>,
     pub ambient: Arc<Vec<f32>>,
@@ -122,6 +126,7 @@ impl Bank {
     }
 }
 
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 struct Voice {
     samples: Arc<Vec<f32>>,
     pos: usize,
@@ -129,6 +134,7 @@ struct Voice {
     gain_r: f32,
 }
 
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 pub struct Mixer {
     bank: Arc<Bank>,
     voices: Vec<Voice>,
@@ -142,6 +148,7 @@ pub struct Mixer {
     duck: f32,
 }
 
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 impl Mixer {
     pub fn new(bank: Arc<Bank>) -> Self {
         Self {
@@ -251,11 +258,13 @@ impl Mixer {
 }
 
 /// Owns the live output stream; dropping it stops audio.
+#[cfg(not(target_arch = "wasm32"))]
 pub struct Audio {
     _stream: cpal::Stream,
     tx: Sender<Command>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Audio {
     pub fn start() -> Option<Audio> {
         let host = cpal::default_host();
@@ -328,6 +337,48 @@ impl Audio {
     }
 }
 
+/// Web stand-in for the native stream owner. cpal's web backend assumes
+/// platform facilities a plain LAN page does not have (it sleeps a
+/// thread, which wasm forbids), so until the WebAudio output lands (M4)
+/// the bank is generated and every request is mixed into the void:
+/// the sound logic runs exactly as native, only the speakers are missing.
+#[cfg(target_arch = "wasm32")]
+pub struct Audio {
+    mixer: std::sync::Mutex<Mixer>,
+}
+
+#[cfg(target_arch = "wasm32")]
+impl Audio {
+    pub fn start() -> Option<Audio> {
+        let bank = Arc::new(Bank::generate(44_100.0));
+        Some(Audio {
+            mixer: std::sync::Mutex::new(Mixer::new(bank)),
+        })
+    }
+
+    pub fn play(&self, request: SoundRequest) {
+        if let Ok(mut mixer) = self.mixer.lock() {
+            mixer.trigger(request);
+        }
+    }
+
+    pub fn set_volumes(&self, master: f32, sfx: f32, ambient: f32) {
+        if let Ok(mut mixer) = self.mixer.lock() {
+            mixer.set_volumes(master, sfx, ambient);
+        }
+    }
+
+    /// Ambient staging lives in the WebAudio graph from M4 onwards.
+    pub fn set_ambient_gain(&self, _gain: f32) {}
+
+    pub fn set_music(&self, on: bool) {
+        if let Ok(mut mixer) = self.mixer.lock() {
+            mixer.set_music(on);
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn build<T>(
     device: &cpal::Device,
     config: cpal::StreamConfig,

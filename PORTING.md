@@ -101,6 +101,15 @@ plain text. All platform contact is concentrated in four files:
       page's `#d00m-canvas`. One real porting fix: `std::time::Instant`
       panics on wasm32, so frame timing uses the `web_time` crate, which
       is `std::time` on native)
+      Addendum (same day): the localhost verification masked a crash that
+      hit every real device — the native 60 fps frame cap *sleeps the
+      thread*, which panics on wasm; localhost's virtual-time clock
+      always showed a full frame elapsed, a real browser's does not.
+      The sleep is native-only now (rAF paces web frames), and the cpal
+      and gilrs web backends are gated off in favour of stubs — WebAudio
+      (M4) and the Gamepad API (M6) will be deliberate implementations,
+      not backend luck. Re-verified over the LAN origin that failed:
+      title renders, console panic-free)
 - [ ] M3 — Input wired: playable through E1M1 with keyboard + mouse
 - [ ] M4 — Audio: effects, ambience and score through WebAudio
 - [ ] M5 — Settings, saves and scores persist in localStorage

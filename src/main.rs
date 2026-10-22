@@ -27,7 +27,9 @@ use std::num::NonZeroU32;
 use std::sync::Arc;
 // `web_time` is `std::time` on native and a `performance.now()` clock
 // on the web, where `std`'s `Instant::now()` panics as unimplemented.
-use web_time::{Duration, Instant};
+#[cfg(not(target_arch = "wasm32"))]
+use web_time::Duration;
+use web_time::Instant;
 
 use audio::{Audio, SoundId, SoundRequest};
 use game::{Difficulty, Game, GameState, Input};
@@ -951,11 +953,16 @@ impl App {
             return;
         }
 
-        // Cap at 60 fps even if the compositor does not vsync.
-        let now = Instant::now();
-        let elapsed = now - self.last_frame;
-        if elapsed < Duration::from_micros(16_600) {
-            std::thread::sleep(Duration::from_micros(16_600) - elapsed);
+        // Cap at 60 fps even if the compositor does not vsync. On the
+        // web the browser already paces redraws through
+        // requestAnimationFrame — and sleeping a wasm thread panics.
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let now = Instant::now();
+            let elapsed = now - self.last_frame;
+            if elapsed < Duration::from_micros(16_600) {
+                std::thread::sleep(Duration::from_micros(16_600) - elapsed);
+            }
         }
         let dt = self.last_render.elapsed().as_secs_f32().min(0.05);
         self.last_frame = Instant::now();
