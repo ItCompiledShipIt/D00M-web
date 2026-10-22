@@ -25,8 +25,10 @@ playable in a browser and deployable to Vercel: the game core compiles to
 WebAssembly unchanged, and only the platform layer — window, input, audio,
 storage — is swapped for web APIs.
 
-**Status: scaffold.** The v1.0.0 source is imported as the baseline; the
-platform swap has not started yet. The plan, module by module, is in
+**Status: M1 complete.** The v1.0.0 source is imported as the baseline,
+and the whole game already compiles and links for
+`wasm32-unknown-unknown` with the native test suite green — the platform
+swap (M2 onwards) is what remains. The plan, module by module, is in
 [PORTING.md](PORTING.md).
 
 ## The shape of the port

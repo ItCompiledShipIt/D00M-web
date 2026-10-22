@@ -1,7 +1,6 @@
 # Porting D00M to the web
 
-Baseline: the native game at **v1.0.0** (92 tests, clippy clean), imported
-unchanged. This document is the work list for turning it into a browser
+Baseline: the native game at **v1.0.0** (91 tests), imported unchanged. This document is the work list for turning it into a browser
 game deployable to Vercel. Check items off as they land; keep the native
 test suite green throughout — it is the spec.
 
@@ -76,17 +75,24 @@ plain text. All platform contact is concentrated in four files:
 
 - Target: `wasm32-unknown-unknown`. Glue: `wasm-bindgen` (hand-written
   `index.html` shell, no bundler — keeps the zero-build-tool spirit).
-- `Cargo.toml`: the four native dependencies (`winit`, `softbuffer`,
-  `cpal`, `gilrs`) become target-gated to non-wasm; the web deps
-  (`wasm-bindgen`, `web-sys`, `js-sys`) gate to wasm. A native build of
-  this repo must still pass `cargo test` — that is the regression net.
+- `Cargo.toml`: verified at M1 — all four native dependencies (`winit`,
+  `softbuffer`, `cpal`, `gilrs`) compile **and link** for wasm32
+  unmodified; each ships a web backend, so no target-gating was needed
+  just to build. Whether those backends are the right runtime path (vs.
+  the hand-rolled canvas/WebAudio plan above) is an M2 decision. A
+  native build of this repo must still pass `cargo test` — that is the
+  regression net.
 - Output is three static files → deploy to Vercel as a static site, no
   framework, no server functions.
 
 ## Milestones
 
-- [ ] M1 — `cargo build --target wasm32-unknown-unknown` compiles; native
-      `cargo test` still 92/92
+- [x] M1 — `cargo build --target wasm32-unknown-unknown` compiles; native
+      `cargo test` still green (done 2026-10-22: zero code changes needed
+      for the build itself; three pre-existing clippy lints fixed along
+      the way, so both targets are now warning-free. One fix removed a
+      duplicated `#[test]` attribute that had been running the secrets
+      test twice — the suite is 91 unique tests, not 92)
 - [ ] M2 — Canvas blit live: title screen renders and animates in a tab
 - [ ] M3 — Input wired: playable through E1M1 with keyboard + mouse
 - [ ] M4 — Audio: effects, ambience and score through WebAudio
