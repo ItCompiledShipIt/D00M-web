@@ -25,7 +25,9 @@ mod ui;
 use std::collections::HashSet;
 use std::num::NonZeroU32;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+// `web_time` is `std::time` on native and a `performance.now()` clock
+// on the web, where `std`'s `Instant::now()` panics as unimplemented.
+use web_time::{Duration, Instant};
 
 use audio::{Audio, SoundId, SoundRequest};
 use game::{Difficulty, Game, GameState, Input};
@@ -68,7 +70,31 @@ fn wrap(index: usize, len: usize, delta: i32) -> usize {
     (index as i32 + delta).rem_euclid(len as i32) as usize
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    run_game()
+}
+
+/// On the web there is no process whose `main` runs: the wasm-bindgen
+/// start function below is the entry point, and the event loop lives on
+/// in browser callbacks after it returns. A placeholder `main` still has
+/// to exist for the binary to link.
+#[cfg(target_arch = "wasm32")]
+fn main() {}
+
+/// Browser entry point: called when the module loads. Panics otherwise
+/// surface as a bare `unreachable` in the console, so route them to it
+/// readably first.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen::prelude::wasm_bindgen(start)]
+fn web_start() {
+    console_error_panic_hook::set_once();
+    if let Err(e) = run_game() {
+        eprintln!("d00m: {e}");
+    }
+}
+
+fn run_game() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.iter().any(|a| a == "--help" || a == "-h") {
         println!(
@@ -146,8 +172,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let event_loop = EventLoop::new()?;
     event_loop.set_control_flow(ControlFlow::Poll);
-    let mut app = App::new();
-    event_loop.run_app(&mut app)?;
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let mut app = App::new();
+        event_loop.run_app(&mut app)?;
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        // `run_app` blocks until exit on native; on the web it can only
+        // register the handler and return, which is what `spawn_app` does.
+        use winit::platform::web::EventLoopExtWebSys;
+        event_loop.spawn_app(App::new());
+    }
     Ok(())
 }
 
@@ -1015,6 +1051,22 @@ impl ApplicationHandler for App {
                 H as f64 * WINDOW_SCALE,
             ))
             .with_min_inner_size(LogicalSize::new(480.0, 300.0));
+        // On the web, draw into the page's own canvas element so the
+        // shell page controls layout; fall back to winit's appended
+        // canvas if the element is missing.
+        #[cfg(target_arch = "wasm32")]
+        let attrs = {
+            use wasm_bindgen::JsCast;
+            use winit::platform::web::WindowAttributesExtWebSys;
+            let canvas = web_sys::window()
+                .and_then(|w| w.document())
+                .and_then(|d| d.get_element_by_id("d00m-canvas"))
+                .and_then(|el| el.dyn_into::<web_sys::HtmlCanvasElement>().ok());
+            match canvas {
+                Some(c) => attrs.with_canvas(Some(c)),
+                None => attrs,
+            }
+        };
         let window = match event_loop.create_window(attrs) {
             Ok(w) => Arc::new(w),
             Err(e) => {

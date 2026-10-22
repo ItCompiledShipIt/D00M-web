@@ -93,7 +93,14 @@ plain text. All platform contact is concentrated in four files:
       the way, so both targets are now warning-free. One fix removed a
       duplicated `#[test]` attribute that had been running the secrets
       test twice — the suite is 91 unique tests, not 92)
-- [ ] M2 — Canvas blit live: title screen renders and animates in a tab
+- [x] M2 — Canvas blit live: title screen renders and animates in a tab
+      (done 2026-10-22, screenshot-verified in headless Chromium. The
+      winit/softbuffer web backends do the blit themselves — no
+      hand-rolled ImageData path needed. Entry is a wasm-bindgen start
+      function calling `EventLoop::spawn_app`; the window binds to the
+      page's `#d00m-canvas`. One real porting fix: `std::time::Instant`
+      panics on wasm32, so frame timing uses the `web_time` crate, which
+      is `std::time` on native)
 - [ ] M3 — Input wired: playable through E1M1 with keyboard + mouse
 - [ ] M4 — Audio: effects, ambience and score through WebAudio
 - [ ] M5 — Settings, saves and scores persist in localStorage

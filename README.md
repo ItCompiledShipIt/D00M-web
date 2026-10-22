@@ -25,10 +25,11 @@ playable in a browser and deployable to Vercel: the game core compiles to
 WebAssembly unchanged, and only the platform layer — window, input, audio,
 storage — is swapped for web APIs.
 
-**Status: M1 complete.** The v1.0.0 source is imported as the baseline,
-and the whole game already compiles and links for
-`wasm32-unknown-unknown` with the native test suite green — the platform
-swap (M2 onwards) is what remains. The plan, module by module, is in
+**Status: M2 complete — it runs in a browser.** The title screen renders
+and animates in a tab (verified in headless Chromium). Build it with
+`./build-web.sh`, then serve `web/` with any static file server and open
+the page. Input (M3), audio (M4), storage (M5) and gamepad (M6) are the
+remaining milestones — the plan, module by module, is in
 [PORTING.md](PORTING.md).
 
 ## The shape of the port
