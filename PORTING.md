@@ -111,7 +111,16 @@ plain text. All platform contact is concentrated in four files:
       not backend luck. Re-verified over the LAN origin that failed:
       title renders, console panic-free)
 - [ ] M3 — Input wired: playable through E1M1 with keyboard + mouse
-- [ ] M4 — Audio: effects, ambience and score through WebAudio
+- [x] M4 — Audio: effects, ambience and score through WebAudio (done
+      2026-10-22, ahead of M3 at the owner's steer. Not a node-graph
+      rewrite: a ScriptProcessorNode callback feeds the *same* Mixer the
+      native cpal callback feeds — identical voices, beds, ducking and
+      crossfades. The context starts suspended under the autoplay policy
+      and resumes on the first click/keypress. Verified headlessly via
+      the exported `d00m_audio_info()` diagnostic: context running at
+      48 kHz, rendered blocks non-silent. Note the title screen itself
+      is silent by design on every platform — the menu duck is 0; the
+      drone fades up in pause/intermission/gameplay)
 - [ ] M5 — Settings, saves and scores persist in localStorage
 - [ ] M6 — Gamepad via the Gamepad API; deployed to Vercel
 

@@ -78,7 +78,6 @@ enum Command {
 
 /// Pre-rendered effects, indexed by `SoundId as usize`, plus the ambient
 /// loop and the music loop.
-#[cfg_attr(target_arch = "wasm32", allow(dead_code))] // read by the native stream's render loop until M4
 pub struct Bank {
     pub sounds: Vec<Arc<Vec<f32>>>,
     pub ambient: Arc<Vec<f32>>,
@@ -126,7 +125,6 @@ impl Bank {
     }
 }
 
-#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 struct Voice {
     samples: Arc<Vec<f32>>,
     pos: usize,
@@ -134,7 +132,6 @@ struct Voice {
     gain_r: f32,
 }
 
-#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 pub struct Mixer {
     bank: Arc<Bank>,
     voices: Vec<Voice>,
@@ -148,7 +145,6 @@ pub struct Mixer {
     duck: f32,
 }
 
-#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 impl Mixer {
     pub fn new(bank: Arc<Bank>) -> Self {
         Self {
@@ -337,43 +333,173 @@ impl Audio {
     }
 }
 
-/// Web stand-in for the native stream owner. cpal's web backend assumes
-/// platform facilities a plain LAN page does not have (it sleeps a
-/// thread, which wasm forbids), so until the WebAudio output lands (M4)
-/// the bank is generated and every request is mixed into the void:
-/// the sound logic runs exactly as native, only the speakers are missing.
+/// WebAudio output owner — the web counterpart of the cpal stream above.
+///
+/// The transport differs, the sound does not: a `ScriptProcessorNode`
+/// callback asks the very same [`Mixer`] to fill an interleaved f32
+/// buffer, exactly as the native callback does, and the channels are
+/// split into the JS `AudioBuffer`. (An AudioWorklet would move the
+/// mixing off the main thread; the script processor keeps one code path
+/// and this game's mix costs almost nothing.)
+///
+/// Browsers refuse to start an `AudioContext` before a user gesture, so
+/// the context is created suspended and a window-level listener resumes
+/// it on the first click or keypress — the same interaction that focuses
+/// the game anyway.
 #[cfg(target_arch = "wasm32")]
 pub struct Audio {
-    mixer: std::sync::Mutex<Mixer>,
+    engine: Arc<std::sync::Mutex<Engine>>,
+    _ctx: web_sys::AudioContext,
+    _node: web_sys::ScriptProcessorNode,
+    _on_process: wasm_bindgen::closure::Closure<dyn FnMut(wasm_bindgen::JsValue)>,
+    _on_gesture: wasm_bindgen::closure::Closure<dyn FnMut(wasm_bindgen::JsValue)>,
+}
+
+/// Mixer plus the scratch buffers the audio callback renders into, and
+/// the peak of the most recent block — a level meter that proves from
+/// outside that sound is really flowing (see `d00m_audio_info`).
+#[cfg(target_arch = "wasm32")]
+struct Engine {
+    mixer: Mixer,
+    interleaved: Vec<f32>,
+    left: Vec<f32>,
+    right: Vec<f32>,
+    peak: f32,
+    blocks: u64,
+}
+
+/// The live engine and context, for the diagnostic export below.
+#[cfg(target_arch = "wasm32")]
+static ENGINE: std::sync::Mutex<Option<Arc<std::sync::Mutex<Engine>>>> =
+    std::sync::Mutex::new(None);
+#[cfg(target_arch = "wasm32")]
+static CONTEXT: std::sync::Mutex<Option<web_sys::AudioContext>> = std::sync::Mutex::new(None);
+
+/// Diagnostic for the browser console / test harness: context state,
+/// sample rate and the last rendered block's peak level.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen::prelude::wasm_bindgen]
+pub fn d00m_audio_info() -> String {
+    let state = CONTEXT
+        .lock()
+        .ok()
+        .and_then(|slot| slot.as_ref().map(|c| format!("{:?} @ {} Hz", c.state(), c.sample_rate())))
+        .unwrap_or_else(|| "no context".to_string());
+    let (peak, blocks) = ENGINE
+        .lock()
+        .ok()
+        .and_then(|slot| {
+            slot.as_ref()
+                .and_then(|e| e.lock().ok().map(|g| (g.peak, g.blocks)))
+        })
+        .unwrap_or((-1.0, 0));
+    format!("audio: {state}, block peak {peak:.3}, blocks {blocks}")
 }
 
 #[cfg(target_arch = "wasm32")]
 impl Audio {
     pub fn start() -> Option<Audio> {
-        let bank = Arc::new(Bank::generate(44_100.0));
+        use wasm_bindgen::JsCast;
+
+        let ctx = web_sys::AudioContext::new().ok()?;
+        let bank = Arc::new(Bank::generate(ctx.sample_rate()));
+        let engine = Arc::new(std::sync::Mutex::new(Engine {
+            mixer: Mixer::new(bank),
+            interleaved: Vec::new(),
+            left: Vec::new(),
+            right: Vec::new(),
+            peak: 0.0,
+            blocks: 0,
+        }));
+
+        let node = ctx
+            .create_script_processor_with_buffer_size_and_number_of_input_channels_and_number_of_output_channels(
+                2048, 0, 2,
+            )
+            .ok()?;
+
+        let shared = engine.clone();
+        let on_process = wasm_bindgen::closure::Closure::wrap(Box::new(move |event: wasm_bindgen::JsValue| {
+            let Ok(event) = event.dyn_into::<web_sys::AudioProcessingEvent>() else {
+                return;
+            };
+            let Ok(buffer) = event.output_buffer() else {
+                return;
+            };
+            let frames = buffer.length() as usize;
+            let Ok(mut e) = shared.lock() else {
+                return;
+            };
+            let e = &mut *e;
+            e.blocks += 1;
+            e.interleaved.resize(frames * 2, 0.0);
+            e.mixer.render::<f32>(&mut e.interleaved, 2);
+            e.left.resize(frames, 0.0);
+            e.right.resize(frames, 0.0);
+            let mut peak = 0.0f32;
+            for i in 0..frames {
+                let (l, r) = (e.interleaved[i * 2], e.interleaved[i * 2 + 1]);
+                e.left[i] = l;
+                e.right[i] = r;
+                peak = peak.max(l.abs()).max(r.abs());
+            }
+            e.peak = peak;
+            let _ = buffer.copy_to_channel(&e.left, 0);
+            let _ = buffer.copy_to_channel(&e.right, 1);
+        }) as Box<dyn FnMut(wasm_bindgen::JsValue)>);
+        node.set_onaudioprocess(Some(on_process.as_ref().unchecked_ref()));
+        node.connect_with_audio_node(&ctx.destination()).ok()?;
+
+        // Autoplay policy: resume on the first pointer/key gesture.
+        let resume_ctx = ctx.clone();
+        let on_gesture = wasm_bindgen::closure::Closure::wrap(Box::new(move |_: wasm_bindgen::JsValue| {
+            if resume_ctx.state() == web_sys::AudioContextState::Suspended {
+                let _ = resume_ctx.resume();
+            }
+        }) as Box<dyn FnMut(wasm_bindgen::JsValue)>);
+        if let Some(win) = web_sys::window() {
+            let cb: &js_sys::Function = on_gesture.as_ref().unchecked_ref();
+            let _ = win.add_event_listener_with_callback("pointerdown", cb);
+            let _ = win.add_event_listener_with_callback("keydown", cb);
+        }
+
+        if let Ok(mut slot) = ENGINE.lock() {
+            *slot = Some(engine.clone());
+        }
+        if let Ok(mut slot) = CONTEXT.lock() {
+            *slot = Some(ctx.clone());
+        }
+
         Some(Audio {
-            mixer: std::sync::Mutex::new(Mixer::new(bank)),
+            engine,
+            _ctx: ctx,
+            _node: node,
+            _on_process: on_process,
+            _on_gesture: on_gesture,
         })
     }
 
     pub fn play(&self, request: SoundRequest) {
-        if let Ok(mut mixer) = self.mixer.lock() {
-            mixer.trigger(request);
+        if let Ok(mut e) = self.engine.lock() {
+            e.mixer.trigger(request);
         }
     }
 
     pub fn set_volumes(&self, master: f32, sfx: f32, ambient: f32) {
-        if let Ok(mut mixer) = self.mixer.lock() {
-            mixer.set_volumes(master, sfx, ambient);
+        if let Ok(mut e) = self.engine.lock() {
+            e.mixer.set_volumes(master, sfx, ambient);
         }
     }
 
-    /// Ambient staging lives in the WebAudio graph from M4 onwards.
-    pub fn set_ambient_gain(&self, _gain: f32) {}
+    pub fn set_ambient_gain(&self, gain: f32) {
+        if let Ok(mut e) = self.engine.lock() {
+            e.mixer.set_duck(gain);
+        }
+    }
 
     pub fn set_music(&self, on: bool) {
-        if let Ok(mut mixer) = self.mixer.lock() {
-            mixer.set_music(on);
+        if let Ok(mut e) = self.engine.lock() {
+            e.mixer.set_music(on);
         }
     }
 }

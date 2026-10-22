@@ -25,12 +25,14 @@ playable in a browser and deployable to Vercel: the game core compiles to
 WebAssembly unchanged, and only the platform layer — window, input, audio,
 storage — is swapped for web APIs.
 
-**Status: M2 complete — it runs in a browser.** The title screen renders
-and animates in a tab (verified in headless Chromium). Build it with
-`./build-web.sh`, then serve `web/` with any static file server and open
-the page. Input (M3), audio (M4), storage (M5) and gamepad (M6) are the
-remaining milestones — the plan, module by module, is in
-[PORTING.md](PORTING.md).
+**Status: M2 + M4 complete — it runs in a browser, with sound.** The
+title screen renders and animates in a tab, and the full soundscape
+(effects, ambient drone, the D-minor score) plays through WebAudio with
+the native mixer intact. Build it with `./build-web.sh`, then serve
+`web/` with any static file server and open the page — click the game
+once so the browser allows audio. Input (M3), storage (M5) and gamepad
++ Vercel (M6) are the remaining milestones — the plan, module by module,
+is in [PORTING.md](PORTING.md).
 
 ## The shape of the port
 

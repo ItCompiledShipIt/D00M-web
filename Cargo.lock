@@ -361,6 +361,7 @@ dependencies = [
  "console_error_panic_hook",
  "cpal",
  "gilrs",
+ "js-sys",
  "softbuffer",
  "wasm-bindgen",
  "web-sys",
